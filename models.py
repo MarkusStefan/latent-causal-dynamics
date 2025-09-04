@@ -25,7 +25,7 @@ class Encoder(nn.Module):
     def __init__(self, in_channels, num_channels, img_size, latent_dim):
         super().__init__()
         
-        # Define the convolutional part of the encoder
+        # convolut
         conv_layers = nn.Sequential(
             NormalizeImg(),
             nn.Conv2d(in_channels, num_channels, kernel_size=7, stride=2), nn.ReLU(),
@@ -103,10 +103,10 @@ class PCMCI():
 
 
     @torch.no_grad()
-    def estimate(self, z_t: torch.Tensor, a_t: torch.Tensor, z_tp1: torch.Tensor) -> torch.Tensor:
+    def estimate(self, z_t: torch.Tensor, a_t: torch.Tensor, z_t_1: torch.Tensor) -> torch.Tensor:
         # Inputs: [N, Z], [N, A], [N, Z]
         U = torch.cat([z_t, a_t], dim=-1).detach().cpu().double().numpy()  # [N, U_dim]
-        V = z_tp1.detach().cpu().double().numpy()                           # [N, Z]
+        V = z_t_1.detach().cpu().double().numpy()                           # [N, Z]
         U = self._standardize(U)
         V = self._standardize(V)
 
@@ -230,15 +230,15 @@ class PCMCI():
 
 
     @torch.no_grad()
-    def estimate(self, z_t: torch.Tensor, a_t: torch.Tensor, z_tp1: torch.Tensor) -> torch.Tensor:
-        # z_t: [N,Z], a_t: [N,A], z_tp1: [N,Z]
+    def estimate(self, z_t: torch.Tensor, a_t: torch.Tensor, z_t_1: torch.Tensor) -> torch.Tensor:
+        # z_t: [N,Z], a_t: [N,A], z_t_1: [N,Z]
         N, Z = z_t.shape
         A = a_t.shape[-1]
         U_dim, V_dim = Z + A, Z
 
         if not _TIGRAMITE:
             # Fallback to simple correlation-based edges
-            adj = _PCMCI(threshold=1.0 - self.alpha).estimate(z_t, a_t, z_tp1)  # crude mapping alpha->threshold
+            adj = _PCMCI(threshold=1.0 - self.alpha).estimate(z_t, a_t, z_t_1)  # crude mapping alpha->threshold
             # Enforce zero diagonal (no self-loops z_i(t)->z_i(t+1))
             if adj.shape == (U_dim, V_dim):
                 diag = torch.arange(min(Z, V_dim))
@@ -254,7 +254,7 @@ class PCMCI():
         X = np.zeros((T, Z + A), dtype=np.float64)
         X[:-1, :Z] = z_t.detach().cpu().numpy()
         X[:-1, Z:] = a_t.detach().cpu().numpy()
-        X[1:, :Z] = z_tp1.detach().cpu().numpy()
+        X[1:, :Z] = z_t_1.detach().cpu().numpy()
 
         if self.standardize:
             mu = X.mean(axis=0, keepdims=True)
@@ -291,7 +291,57 @@ class PCMCI():
             adj[j, j] = 0.0
 
         return torch.from_numpy(adj).to(dtype=torch.float32)
-# ...existing code...
+
+
+# import torch
+# import numpy as np
+# from scipy.stats import pearsonr
+
+# # Example: Partial correlation function
+# def partial_correlation(x, y, z):
+#     """
+#     Compute partial correlation between x and y given z.
+#     """
+#     x, y, z = torch.tensor(x), torch.tensor(y), torch.tensor(z)
+#     x_residual = x - torch.matmul(torch.linalg.pinv(z), z.T @ x)
+#     y_residual = y - torch.matmul(torch.linalg.pinv(z), z.T @ y)
+#     return pearsonr(x_residual.numpy(), y_residual.numpy())[0]
+
+# # PCMCI Algorithm (Simplified)
+# def pcmci(data, max_lag=2, alpha=0.05):
+#     """
+#     Perform PCMCI causal discovery on time-series data.
+#     Args:
+#         data: Time-series data (NumPy array or PyTorch tensor).
+#         max_lag: Maximum lag to consider.
+#         alpha: Significance level for independence tests.
+#     Returns:
+#         Causal graph (adjacency matrix).
+#     """
+#     n_vars = data.shape[1]
+#     causal_graph = torch.zeros((n_vars, n_vars, max_lag + 1))
+
+#     for i in range(n_vars):
+#         for j in range(n_vars):
+#             if i == j:
+#                 continue
+#             for lag in range(1, max_lag + 1):
+#                 x = data[lag:, i]
+#                 y = data[:-lag, j]
+#                 z = data[:-lag, :]  # All other variables as conditioning set
+#                 corr = partial_correlation(x, y, z)
+#                 if abs(corr) > alpha:  # Threshold for significance
+#                     causal_graph[i, j, lag] = corr
+
+#     return causal_graph
+
+# # Example usage
+# data = np.random.rand(100, 3)  # 100 time points, 3 variables
+# causal_graph = pcmci(data)
+# print("Causal Graph:", causal_graph)
+
+
+
 
 
 class CausalGraph():
@@ -307,7 +357,7 @@ class CausalGraph():
         # init latent causal graph G as a complete directed graph
         # directed edges are only drawn from U to V
         # elements below diagonals are 1, on the diagonal and above are 0
-        # s.t. (z, a) --> (z')
+        # s.t. (z, a) [U] --> (z') [V]
         self.adjacency_matrix =  torch.tril(torch.ones((self.U_dim, self.V_dim)), diagonal=-1)
 
     def to(self, device):
@@ -329,19 +379,28 @@ class LatentTransitionModel(nn.Module):
     """ 
     Latent Transition Model
     Learns a mapping (z, a) --> (z') constraint by a causal graph G
+
+    models:
+        z_i' = f_i(PA(z_i), a, N_i), whereby N_i is a stochastic Gaussian ~N(0, I)
     """
-    def __init__(self, latent_dim: int, action_dim: int, hidden: int = 64):
+    def __init__(self, latent_dim: int, action_dim: int, hidden: int = 64, rng: int = 1):
         super().__init__()
         self.latent_dim = latent_dim
         self.action_dim = action_dim
         in_dim = latent_dim + action_dim
-        self.f = nn.ModuleList([
+        # construct on FNN for each latent dimension
+        self.fnns = nn.ModuleList([
             nn.Sequential(
                 nn.Linear(in_dim, hidden), nn.ReLU(),
                 nn.Linear(hidden, hidden), nn.ReLU(),
                 nn.Linear(hidden, 1),
             ) for _ in range(latent_dim)
         ])
+        # learnable log-std per latent dim (σ_j = exp(log_std[j]))
+        self.log_std = nn.Parameter(torch.full((latent_dim, ), -2.0))
+
+        torch.set_rng_state(rng)
+        torch.manual_seed(rng)
 
 
     def __call__(self, latent_state, action, causal_graph):
@@ -350,13 +409,17 @@ class LatentTransitionModel(nn.Module):
 
     def forward(self, z_t: torch.Tensor, a_t: torch.Tensor, graph: torch.Tensor) -> torch.Tensor:
         # z_t: [B, latent_dim], a_t: [B, action_dim], graph: [U_dim, V_dim]
-        B = z_t.shape[0]
+        # B = z_t.shape[0]
         U = torch.cat([z_t, a_t], dim=-1)  # [B, U_dim]
         outs = []
-        for j in range(self.latent_dim):
+        # iterate through |V| columns of adjacency list [|U|, |V|]
+        for j in range(self.latent_dim): 
             col_mask = graph[:, j]  # [U_dim]
+            # select which factors of U may have a causal effect on V
             masked = U * col_mask.unsqueeze(0)  # [B, U_dim]
-            out_j = self.f[j](masked)
+            out_j = self.fnns[j](masked) # each column is fed through its dedicated FNN f_j
+            std_j = self.log_std[j].exp() # exponentiate log-std
+            out_j = out_j + torch.randn_like(out_j) * std_j  # add Gaussian noise N(0, 1) scaled by learned std
             outs.append(out_j)
         z_t_1 = torch.cat(outs, dim=-1)  # [B, latent_dim]
         return z_t_1
@@ -390,14 +453,16 @@ class RewardModel(nn.Module):
 if __name__ == "__main__":
     from env import DMCEnv
 
-    env = DMCEnv()
+    env = DMCEnv(domain_name='cartpole', task_name='swingup', from_pixels=True, pixels_only=True, img_size=64)
     env.reset()
-    encoder = Encoder(in_channels=3, num_channels=32, img_size=64, latent_dim=64)
-
+    encoder = Encoder(in_channels=3, num_channels=32, img_size=64, latent_dim=8)
+    graph = CausalGraph(latent_state_dim=8, latent_action_dim=4)
+    print(graph())
     while True:
         action = env.sample_action()
-        next_state, reward, done = env.step(action)
-        # encode the action and predict the next state
-        action_encoding = encoder(action)
+        # print(action) # scalar
+        next_state, reward, done, _ = env.step(action)
+        print(next_state.shape) 
+        latent_next_state = encoder(next_state)
         if done:
             break

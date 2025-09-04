@@ -57,4 +57,4 @@ class LatentDynamicsLoss(nn.MSELoss):
         return transition_loss + reward_loss
 
     def __call__(self, *args, **kwds):
-        return super().__call__(*args, **kwds)
+        return super().__call__(*args, **kwds) # calls self.forward()

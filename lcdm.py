@@ -119,7 +119,7 @@ class LCDM():
         if len(self.buffer) < batch_size:
             return
         batch = self.buffer.sample(batch_size)
-        adj = self.pcmci.estimate(batch["z_t"], batch["a_t"], batch["z_tp1"])
+        adj = self.pcmci.estimate(batch["z_t"], batch["a_t"], batch["z_t_1"])
         self.causal_graph.update(adj)
 
     def optimize_step(self, batch_size: int = 128):
@@ -130,11 +130,11 @@ class LCDM():
         z_t = batch["z_t"].to(self.device).float()
         a_t = batch["a_t"].to(self.device).float()
         r_t = batch["r_t"].to(self.device).float()
-        z_tp1 = batch["z_tp1"].to(self.device).float()
+        z_t_1 = batch["z_t_1"].to(self.device).float()
 
-        z_tp1_pred = self.transition_model(z_t, a_t, self.causal_graph())
+        z_t_1_pred = self.transition_model(z_t, a_t, self.causal_graph())
         r_pred = self.reward_model(z_t, a_t)
-        loss = self.loss_func(z_tp1_pred, z_tp1, r_pred, r_t)
+        loss = self.loss_func(z_t_1_pred, z_t_1, r_pred, r_t)
         self.opt.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(

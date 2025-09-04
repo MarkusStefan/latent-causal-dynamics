@@ -55,6 +55,15 @@ class Environment(ABC):
         """
         pass
 
+    @abstractmethod
+    def sample_action(self):
+        """
+        Sample actions from action space.
+
+        :return: An action as Tensor (scalar, array).
+        """
+        pass
+
     def _get_reward(self, state, action):
         """
         Calculate the reward for a given state and action.
@@ -162,6 +171,12 @@ class DMCEnv(Environment):
         :return: The action specification object.
         """
         return self.action_space
+    
+    def sample_action(self):
+        """ 
+        Sample action from action space.
+        """
+        return self.get_actions().sample()
 
 
 

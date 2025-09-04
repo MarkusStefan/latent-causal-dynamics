@@ -44,16 +44,16 @@ def main():
             # Encode z, z'
             with torch.no_grad():
                 z_t = lcdm.encode(obs.unsqueeze(0)).squeeze(0)
-                z_tp1 = lcdm.encode(next_obs.unsqueeze(0)).squeeze(0)
-            lcdm.buffer.add_transition(z_t, a, reward.view(1), z_tp1)
-            # Optimize
+                z_t_1 = lcdm.encode(next_obs.unsqueeze(0)).squeeze(0)
+            lcdm.buffer.add_transition(z_t, a, reward.view(1), z_t_1)
+            # optimize
             loss = lcdm.optimize_step(batch_size=128)
             ep_return += float(reward.item())
             obs = next_obs
             total_steps += 1
-            # Periodically refine graph
-            if total_steps % 1000 == 0:
-                lcdm.update_pcmci(batch_size=2048)
+            # periodically refine graph
+            if total_steps % 500 == 0:
+                lcdm.update_pcmci(batch_size=1024)
         if ep == 0:
             # skip loss in first episode as buffer is too small for actual loss
             print(f"Episode {ep+1}/{args.episodes} | Return: {ep_return:.2f}")
