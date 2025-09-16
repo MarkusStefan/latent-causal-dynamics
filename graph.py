@@ -1,3 +1,0 @@
-'''
-Causal Graph
-'''
