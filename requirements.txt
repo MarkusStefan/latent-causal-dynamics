@@ -1,5 +1,8 @@
 torch
+torchvision
 dm_control
 numpy
 tigramite
 torchrl
+matplotlib
+pandas

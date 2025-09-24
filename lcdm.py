@@ -88,8 +88,20 @@ class LCDM():
 
         # causal graph & PCMCI estimator for causal discovery
         self.causal_graph = CausalGraph(latent_state_dim=latent_dim, latent_action_dim=action_dim).to(device)
-        # self.pcmci = PCMCI(threshold=pcmci_threshold)
-        self.pcmci = PCMCI()
+        # Try to use the proper PCMCI implementation; if it fails at runtime (e.g. tigramite not available
+        # at import-time), fall back to a lightweight correlation-based estimator so the benchmark can run.
+        try:
+            self.pcmci = PCMCI()
+        except Exception:
+            # fall back to local lightweight estimator defined in models.py
+            try:
+                from models import _PCMCI
+                print("Warning: tigramite PCMCI unavailable at runtime — using lightweight correlation fallback for benchmark.")
+                self.pcmci = _PCMCI(threshold=pcmci_threshold)
+            except Exception:
+                # final fallback: set pcmci to None (disable graph updates)
+                print("Warning: PCMCI unavailable; PCMCI-based graph updates will be disabled.")
+                self.pcmci = None
 
         # Planner bounds assumed [-1,1]
         self.planner = MPPIPlanner(

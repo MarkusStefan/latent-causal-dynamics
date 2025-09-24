@@ -98,8 +98,10 @@ class PCMCI():
         self.use_fdr = use_fdr
         self.standardize = standardize
         if not _TIGRAMITE:
-            warnings.warn("Tigramite not found. Falling back to simple correlation PCMCI (_PCMCI). "
-                          "pip install tigramite to enable proper PCMCI.", RuntimeWarning)
+            raise ImportError(
+                "tigramite is required for PCMCI. Install it with `pip install tigramite` "
+                "and ensure its dependencies (numpy, scipy, networkx, statsmodels) are available."
+            )
 
 
     @torch.no_grad()
@@ -237,13 +239,8 @@ class PCMCI():
         U_dim, V_dim = Z + A, Z
 
         if not _TIGRAMITE:
-            # Fallback to simple correlation-based edges
-            adj = _PCMCI(threshold=1.0 - self.alpha).estimate(z_t, a_t, z_t_1)  # crude mapping alpha->threshold
-            # Enforce zero diagonal (no self-loops z_i(t)->z_i(t+1))
-            if adj.shape == (U_dim, V_dim):
-                diag = torch.arange(min(Z, V_dim))
-                adj[diag, diag] = 0.0
-            return adj.to(dtype=torch.float32)
+            # Shouldn't happen because constructor already enforces tigramite presence
+            raise ImportError("tigramite must be installed to use PCMCI. No fallback available.")
 
         # Build a time series X of shape [T, Z+A] such that:
         #   X[t, :Z]   = z_t
@@ -354,11 +351,9 @@ class CausalGraph():
     def __init__(self, latent_state_dim, latent_action_dim):
         self.U_dim = latent_state_dim + latent_action_dim 
         self.V_dim = latent_state_dim 
-        # init latent causal graph G as a complete directed graph
-        # directed edges are only drawn from U to V
-        # elements below diagonals are 1, on the diagonal and above are 0
-        # s.t. (z, a) [U] --> (z') [V]
-        self.adjacency_matrix =  torch.tril(torch.ones((self.U_dim, self.V_dim)), diagonal=-1)
+        # init latent causal graph G as a complete directed graph (U -> V)
+        # Algorithm 1 starts from a fully connected graph, so initialize all ones.
+        self.adjacency_matrix = torch.ones((self.U_dim, self.V_dim), dtype=torch.float32)
 
     def to(self, device):
         self.adjacency_matrix = self.adjacency_matrix.to(device)
@@ -399,8 +394,12 @@ class LatentTransitionModel(nn.Module):
         # learnable log-std per latent dim (σ_j = exp(log_std[j]))
         self.log_std = nn.Parameter(torch.full((latent_dim, ), -2.0))
 
-        torch.set_rng_state(rng)
-        torch.manual_seed(rng)
+        # Seed RNG for reproducibility (accept integer seeds)
+        try:
+            torch.manual_seed(int(rng))
+        except Exception:
+            # if rng is not an int, fall back to no-op
+            pass
 
 
     def __call__(self, latent_state, action, causal_graph):
