@@ -22,7 +22,7 @@ apply loss func, backprop through ALL models:                           L(z', z)
 ```
 
 
-![](assets/LCDM.png)
+![](https://github.com/MarkusStefan/latent-causal-dynamics/blob/main/assets/LCDM.PNG)
 **Figure:** LCDM transition flow. The encoder $g_{\theta}$ creates latent embeddings of the image input pixel. The PCMCI algorithm is employed for discovering the edges indicating the flow of cause and effect in the causal graph $G$. Each element in the latent observation vector $z^{i}$ in the graph is modeled by an individual multi layer perceptron (MLP) $\{f_{\theta_i}\}_i$, whereby each neural network aims to predict the $i^{\text{th}}$ element in the latent vector of the next state $z_{t+1}^i$ through the values of the parent nodes (=precedents of $z_t^i$ in the causal graph at the previous timestep $t-1$), the action $a_t$ prescribed by the policy $\pi$, and a stochastic noise term $N_i \sim \mathcal{N}(0, I)$: 
 
 $$z_{t+1}^i = f_{\theta_i}\left(PA(z_t^i), a_t, N_i\right)$$
