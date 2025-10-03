@@ -1,4 +1,4 @@
-# *Unofficial* Implementation of "Latent Causal Dynamics Model for Model-Based Reinforcement Learning" (NeurIOS 2024)
+# *Unofficial* Implementation of "Latent Causal Dynamics Model for Model-Based Reinforcement Learning" (NeurIPS 2024)
 
 This repository contains **my** version and interpretation of the paper [Latent Causal Dynamics Model for Model-Based Reinforcement Learning](https://link.springer.com/chapter/10.1007/978-981-99-8082-6_17). I declare no affiliation with the authors of the paper, nor do I guarantee the correctness of this implementation.
 
